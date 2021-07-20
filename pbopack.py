@@ -55,12 +55,12 @@ class Pbo:
             self.headers.append(header)
             first_header = False
 
-        os.makedirs(dest, exist_ok=True)
-
-        if len(self.properties) != 0:
-            with open(os.path.join(dest, self.pbo_prop_fname), 'w') as file:
-                for prop in self.properties:
-                    file.write('%s=%s\n' % (prop[0], prop[1]))
+        if not self.dryrun:
+            os.makedirs(dest, exist_ok=True)
+            if len(self.properties) != 0:
+                with open(os.path.join(dest, self.pbo_prop_fname), 'w') as file:
+                    for prop in self.properties:
+                        file.write('%s=%s\n' % (prop[0], prop[1]))
 
         for header in self.headers:
             filesize = header.packed_size
@@ -72,16 +72,17 @@ class Pbo:
                     ', compressed ' if header.is_compressed else ''
                 ))
 
-            path = os.path.join(dest, Pbo.pbo_path_to_os_path(header.filename))
-            os.makedirs(os.path.dirname(path), exist_ok=True)
+            if not self.dryrun:
+                path = os.path.join(dest, Pbo.pbo_path_to_os_path(header.filename))
+                os.makedirs(os.path.dirname(path), exist_ok=True)
 
-            with open(path, 'wb') as file:
-                data = self.fileobj.read(filesize)
-                if len(data) != filesize:
-                    raise ValueError('expected data, but reached end of file')
-                file.write(data)
+                with open(path, 'wb') as file:
+                    data = self.fileobj.read(filesize)
+                    if len(data) != filesize:
+                        raise ValueError('expected data, but reached end of file')
+                    file.write(data)
 
-            os.utime(path, (header.timestamp, header.timestamp))
+                os.utime(path, (header.timestamp, header.timestamp))
 
         # get pbo file size
         self.fileobj.seek(0, 2)
