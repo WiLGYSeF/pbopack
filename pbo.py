@@ -48,12 +48,17 @@ class Pbo:
                 path = os.path.join(dest, Pbo.pbo_path_to_os_path(header.filename))
                 os.makedirs(os.path.dirname(path), exist_ok=True)
 
-                # TODO: write in parts
+                total = 0
                 with open(path, 'wb') as file:
-                    data = pbo_fileobj.read(filesize)
-                    if len(data) != filesize:
-                        self._error(ValueError, 'expected data, but reached end of file')
-                    file.write(data)
+                    while True:
+                        data = pbo_fileobj.read(min(FILE_BUFFER_SZ, filesize - total))
+                        if len(data) == 0:
+                            break
+                        total += len(data)
+                        file.write(data)
+
+                if total != filesize:
+                    self._error(ValueError, 'expected data, but reached end of file')
 
                 os.utime(path, (header.timestamp, header.timestamp))
 
