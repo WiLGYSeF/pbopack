@@ -19,30 +19,84 @@ class Pbo:
         self.dryrun = kwargs.get('dryrun', False)
         self.verbose = kwargs.get('verbose', 0)
 
-        self.fileobj = None
-        self.filename = None
-        self.headers = []
-
-        self.properties = []
-
     def unpack(self, pbo_file, dest):
-        self.open(pbo_file, write=False)
+        with open(pbo_file, 'rb') as pbo_fileobj:
+            headers, properties = Pbo.get_headers(pbo_fileobj)
 
+            if not self.dryrun:
+                os.makedirs(dest, exist_ok=True)
+                if len(properties) != 0:
+                    with open(os.path.join(dest, self.pbo_prop_fname), 'w') as file:
+                        for prop in properties:
+                            file.write('%s=%s\n' % (prop[0], prop[1]))
+
+            for header in headers:
+                filesize = header.packed_size
+
+                if self.verbose >= 1:
+                    print('  unpacking: %s (%.2f KB%s) ...' % (
+                        header.filename,
+                        round(filesize / 1024, 2),
+                        ', compressed ' if header.is_compressed else ''
+                    ))
+
+                if self.dryrun:
+                    continue
+
+                path = os.path.join(dest, Pbo.pbo_path_to_os_path(header.filename))
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+
+                with open(path, 'wb') as file:
+                    data = pbo_fileobj.read(filesize)
+                    if len(data) != filesize:
+                        raise ValueError('expected data, but reached end of file')
+                    file.write(data)
+
+                os.utime(path, (header.timestamp, header.timestamp))
+
+            # get pbo file size
+            pbo_fileobj.seek(0, 2)
+            pbo_size = pbo_fileobj.tell()
+            pbo_fileobj.seek(0, 0)
+            offset = 0
+
+            sha1 = hashlib.sha1()
+
+            while offset < pbo_size - 21:
+                readsz = min(FILE_BUFFER_SZ, pbo_size - offset - 21)
+                sha1.update(pbo_fileobj.read(readsz))
+                offset += readsz
+
+            zero = pbo_fileobj.read(1)
+            if zero[0] != 0:
+                raise ValueError('end of file checksum byte is not zero')
+
+            checksum = pbo_fileobj.read(20)
+            if checksum != sha1.digest():
+                raise ValueError('checksums do not match')
+
+    def pack(self, directory, pbo_file):
+        pass
+
+    @staticmethod
+    def get_headers(stream):
+        headers = []
+        properties = []
         first_header = True
 
         while True:
-            header = HeaderEntry.from_stream(self.fileobj)
+            header = HeaderEntry.from_stream(stream)
             if header.mimetype == HEADER_MIMETYPE_VERS:
                 if not first_header:
-                    raise ValueError()
+                    raise ValueError('header with mimetype VERS not the first header found')
 
                 while True:
-                    key = read_str(self.fileobj)
+                    key = read_str(stream)
                     if len(key) == 0:
                         break
 
-                    val = read_str(self.fileobj)
-                    self.properties.append([key, val])
+                    val = read_str(stream)
+                    properties.append([key, val])
                 first_header = False
                 continue
             if header.mimetype == HEADER_MIMETYPE_CPRS:
@@ -52,70 +106,10 @@ class Pbo:
 
             if len(header.filename) == 0:
                 break
-            self.headers.append(header)
+            headers.append(header)
             first_header = False
 
-        if not self.dryrun:
-            os.makedirs(dest, exist_ok=True)
-            if len(self.properties) != 0:
-                with open(os.path.join(dest, self.pbo_prop_fname), 'w') as file:
-                    for prop in self.properties:
-                        file.write('%s=%s\n' % (prop[0], prop[1]))
-
-        for header in self.headers:
-            filesize = header.packed_size
-
-            if self.verbose >= 1:
-                print('  unpacking: %s (%.2f KB%s) ...' % (
-                    header.filename,
-                    round(filesize / 1024, 2),
-                    ', compressed ' if header.is_compressed else ''
-                ))
-
-            if not self.dryrun:
-                path = os.path.join(dest, Pbo.pbo_path_to_os_path(header.filename))
-                os.makedirs(os.path.dirname(path), exist_ok=True)
-
-                with open(path, 'wb') as file:
-                    data = self.fileobj.read(filesize)
-                    if len(data) != filesize:
-                        raise ValueError('expected data, but reached end of file')
-                    file.write(data)
-
-                os.utime(path, (header.timestamp, header.timestamp))
-
-        # get pbo file size
-        self.fileobj.seek(0, 2)
-        pbo_size = self.fileobj.tell()
-        self.fileobj.seek(0, 0)
-        offset = 0
-
-        sha1 = hashlib.sha1()
-
-        while offset < pbo_size - 21:
-            readsz = min(FILE_BUFFER_SZ, pbo_size - offset - 21)
-            sha1.update(self.fileobj.read(readsz))
-            offset += readsz
-
-        zero = self.fileobj.read(1)
-        if zero[0] != 0:
-            raise ValueError('end of file checksum byte is not zero')
-
-        checksum = self.fileobj.read(20)
-        if checksum != sha1.digest():
-            raise ValueError('checksums do not match')
-
-        self.close()
-
-    def pack(self, directory, pbo_file):
-        pass
-
-    def open(self, fname, write=False):
-        self.fileobj = open(fname, 'wb' if write else 'rb')
-
-    def close(self):
-        self.fileobj.close()
-        self.fileobj = None
+        return headers, properties
 
     @staticmethod
     def os_path_to_pbo_path(path):
