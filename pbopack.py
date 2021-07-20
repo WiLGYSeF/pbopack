@@ -22,6 +22,9 @@ class Pbo:
     def pack(self, directory, pbo_file):
         pass
 
+    def open(self, fname, write=False):
+        self.fileobj = open(fname, 'wb' if write else 'rb')
+
 def main(args):
     parser = argparse.ArgumentParser(
         description='Arma 3 PBO (un)packer',
