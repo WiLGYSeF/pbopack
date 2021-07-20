@@ -25,6 +25,10 @@ class Pbo:
     def open(self, fname, write=False):
         self.fileobj = open(fname, 'wb' if write else 'rb')
 
+    def close(self):
+        self.fileobj.close()
+        self.fileobj = None
+
 def main(args):
     parser = argparse.ArgumentParser(
         description='Arma 3 PBO (un)packer',
