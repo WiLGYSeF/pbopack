@@ -59,6 +59,7 @@ If input is a file and no output is given, verifies the checksum of the file.
                 print('verified')
             else:
                 print('error: not verified', file=sys.stderr)
+                sys.exit(1)
         else:
             pbo.unpack(infname, outfname)
     elif stat.S_ISDIR(infmode):
