@@ -119,12 +119,12 @@ class Pbo:
                 properties = []
                 with open(os.path.join(directory, self.pbo_prop_fname), 'r') as propfile:
                     for line in propfile:
-                        line = line.rstrip("\n")
+                        line = line.rstrip('\n')
                         if len(line) == 0:
                             continue
 
-                        spl = line.split("=")
-                        properties.append([spl[0], "=".join(spl[1:])])
+                        spl = line.split('=')
+                        properties.append([spl[0], '='.join(spl[1:])])
 
                 header = HeaderEntry('', MIMETYPE_VERS, 0, 0, 0, 0)
                 buf = bytes(header)
