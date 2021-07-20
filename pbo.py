@@ -79,7 +79,91 @@ class Pbo:
                 self._error(ValueError, 'checksums do not match')
 
     def pack(self, directory, pbo_file):
-        pass
+        headers = []
+        header_paths = {}
+        prefixlen = len(os.path.abspath(directory)) + 1
+
+        for root, _, files in os.walk(directory):
+            for fname in files:
+                path = os.path.abspath(os.path.join(root, fname))
+                header_fname = Pbo.os_path_to_pbo_path(path[prefixlen:])
+                if header_fname == self.pbo_prop_fname:
+                    continue
+
+                if self.verbose >= 1:
+                    print('  packing: %s ...' % header_fname)
+
+                stat = os.stat(path)
+                header = HeaderEntry(
+                    header_fname,
+                    0,
+                    0,
+                    0,
+                    int(stat.st_mtime),
+                    stat.st_size
+                )
+                header_paths[header] = path
+                headers.append(header)
+
+        headers.sort(key=lambda x: x.filename.lower())
+
+        sha1 = hashlib.sha1()
+
+        with open(pbo_file, 'wb') as pbo_fileobj:
+            try:
+                properties = []
+                with open(os.path.join(directory, self.pbo_prop_fname), 'r') as propfile:
+                    for line in propfile:
+                        line = line.rstrip("\n")
+                        if len(line) == 0:
+                            continue
+
+                        spl = line.split("=")
+                        properties.append([spl[0], "=".join(spl[1:])])
+
+                header = HeaderEntry('', MIMETYPE_VERS, 0, 0, 0, 0)
+                buf = bytes(header)
+
+                pbo_fileobj.write(buf)
+                sha1.update(buf)
+
+                for prop in properties:
+                    buf = Pbo.asciiz(prop[0])
+                    pbo_fileobj.write(buf)
+                    sha1.update(buf)
+
+                    buf = Pbo.asciiz(prop[1])
+                    pbo_fileobj.write(buf)
+                    sha1.update(buf)
+
+                pbo_fileobj.write(b'\x00')
+                sha1.update(b'\x00')
+            except FileNotFoundError:
+                pass
+            except Exception as exc:
+                self._error(Exception, str(exc))
+
+            for header in headers:
+                buf = bytes(header)
+                pbo_fileobj.write(buf)
+                sha1.update(buf)
+
+            # last header
+            pbo_fileobj.write(b'\x00' * 21)
+            sha1.update(b'\x00' * 21)
+
+            for header in headers:
+                with open(header_paths[header], 'rb') as data_file:
+                    while True:
+                        buf = data_file.read(FILE_BUFFER_SZ)
+                        if len(buf) == 0:
+                            break
+
+                        pbo_fileobj.write(buf)
+                        sha1.update(buf)
+
+            pbo_fileobj.write(b'\x00')
+            pbo_fileobj.write(sha1.digest())
 
     def _error(self, exception, message):
         if self.ignore_errors:
@@ -122,6 +206,10 @@ class Pbo:
             first_header = False
 
         return headers, properties
+
+    @staticmethod
+    def asciiz(string):
+        return string.encode('ascii') + b'\x00'
 
     @staticmethod
     def os_path_to_pbo_path(path):
