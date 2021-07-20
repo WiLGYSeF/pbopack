@@ -3,14 +3,22 @@
 # https://community.bistudio.com/wiki/PBO_File_Format
 
 import argparse
+import hashlib
 import os
 import stat
 import struct
 import sys
 
 
+FILE_BUFFER_SZ = 1024 * 1024 # 1 MB
+
+
 class Pbo:
-    def __init__(self):
+    def __init__(self, **kwargs):
+        self.pbo_prop_fname = kwargs.get('pbo_prop_fname', '.pboproperties')
+        self.dryrun = kwargs.get('dryrun', False)
+        self.verbose = kwargs.get('verbose', 0)
+
         self.fileobj = None
         self.filename = None
         self.headers = []
@@ -18,7 +26,85 @@ class Pbo:
         self.properties = []
 
     def unpack(self, pbo_file, dest):
-        pass
+        self.open(pbo_file, write=False)
+
+        first_header = True
+
+        while True:
+            header = HeaderEntry.from_stream(self.fileobj)
+            if header.mimetype == HEADER_MIMETYPE_VERS:
+                if not first_header:
+                    raise ValueError()
+
+                while True:
+                    key = read_str(self.fileobj)
+                    if len(key) == 0:
+                        break
+
+                    val = read_str(self.fileobj)
+                    self.properties.append([key, val])
+                first_header = False
+                continue
+            if header.mimetype == HEADER_MIMETYPE_CPRS:
+                raise NotImplementedError('compressed PBO not supported')
+            if header.mimetype == HEADER_MIMETYPE_ENCO:
+                raise NotImplementedError('encoded PBO not supported')
+
+            if len(header.filename) == 0:
+                break
+            self.headers.append(header)
+            first_header = False
+
+        os.makedirs(dest, exist_ok=True)
+
+        if len(self.properties) != 0:
+            with open(os.path.join(dest, self.pbo_prop_fname), 'w') as file:
+                for prop in self.properties:
+                    file.write('%s=%s\n' % (prop[0], prop[1]))
+
+        for header in self.headers:
+            filesize = header.packed_size
+
+            if self.verbose >= 1:
+                print('  unpacking: %s (%.2f KB%s) ...' % (
+                    header.filename,
+                    round(filesize / 1024, 2),
+                    ', compressed ' if header.is_compressed else ''
+                ))
+
+            path = os.path.join(dest, Pbo.pbo_path_to_os_path(header.filename))
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+
+            with open(path, 'wb') as file:
+                data = self.fileobj.read(filesize)
+                if len(data) != filesize:
+                    raise ValueError('expected data, but reached end of file')
+                file.write(data)
+
+            os.utime(path, (header.timestamp, header.timestamp))
+
+        # get pbo file size
+        self.fileobj.seek(0, 2)
+        pbo_size = self.fileobj.tell()
+        self.fileobj.seek(0, 0)
+        offset = 0
+
+        sha1 = hashlib.sha1()
+
+        while offset < pbo_size - 21:
+            readsz = min(FILE_BUFFER_SZ, pbo_size - offset - 21)
+            sha1.update(self.fileobj.read(readsz))
+            offset += readsz
+
+        zero = self.fileobj.read(1)
+        if zero[0] != 0:
+            raise ValueError('end of file checksum byte is not zero')
+
+        checksum = self.fileobj.read(20)
+        if checksum != sha1.digest():
+            raise ValueError('checksums do not match')
+
+        self.close()
 
     def pack(self, directory, pbo_file):
         pass
@@ -29,6 +115,23 @@ class Pbo:
     def close(self):
         self.fileobj.close()
         self.fileobj = None
+
+    @staticmethod
+    def os_path_to_pbo_path(path):
+        if os.sep == '\\':
+            return path
+        return '\\'.join(path.split(os.sep))
+
+    @staticmethod
+    def pbo_path_to_os_path(path):
+        if os.sep == '\\':
+            return path
+        return os.path.join(*path.split('\\'))
+
+HEADER_MIMETYPE_VERS = 0x56657273
+HEADER_MIMETYPE_CPRS = 0x43707273
+HEADER_MIMETYPE_ENCO = 0x456e6372
+HEADER_MIMETYPE_DUMM = 0x00000000
 
 class HeaderEntry:
     def __init__(self, filename, mimetype, original_size, offset, timestamp, data_size):
@@ -57,7 +160,7 @@ class HeaderEntry:
         return self.original_size
 
     @property
-    def compressed(self):
+    def is_compressed(self):
         # return self.mimetype_string == "Cprs"
         return self.packed_size != self.unpacked_size
 
@@ -95,7 +198,7 @@ def read_str(stream):
         char = stream.read(1)
         if len(char) == 0 or ord(char) == 0:
             break
-        string += chr(char)
+        string += chr(char[0])
     return string
 
 def main(args):
@@ -120,6 +223,10 @@ If input is a file and no output is given, verifies the checksum of the file.
         action='store', default='.pboproperties',
         help='specifies the file that contains the PBO properties (default .pboproperties)'
     )
+    parser.add_argument('-n', '--dryrun',
+        action='store_true', default=False,
+        help='dryrun (un)packing PBO'
+    )
     argspace, files = parser.parse_known_args(args)
 
     if len(files) == 0 or len(files) > 2:
@@ -129,12 +236,16 @@ If input is a file and no output is given, verifies the checksum of the file.
     infname = files[0]
     outfname = files[1] if len(files) >= 2 else None
 
+    pbo = Pbo(
+        pbo_prop_fname=argspace.pbo_properties,
+        dryrun=argspace.dryrun,
+        verbose=argspace.verbose,
+    )
+
     infmode = os.stat(infname).st_mode
     if stat.S_ISREG(infmode):
-        pbo = Pbo()
         pbo.unpack(infname, outfname)
     elif stat.S_ISDIR(infmode):
-        pbo = Pbo()
         pbo.pack(infname, outfname)
     else:
         print('error: %s is not a regular file nor a directory' % infname, file=sys.stderr)
