@@ -16,12 +16,13 @@ FILE_BUFFER_SZ = 1024 * 1024 # 1 MB
 class Pbo:
     def __init__(self, **kwargs):
         self.pbo_prop_fname = kwargs.get('pbo_prop_fname', '.pboproperties')
+        self.ignore_errors = kwargs.get('ignore_errors', False)
         self.dryrun = kwargs.get('dryrun', False)
         self.verbose = kwargs.get('verbose', 0)
 
     def unpack(self, pbo_file, dest):
         with open(pbo_file, 'rb') as pbo_fileobj:
-            headers, properties = Pbo.get_headers(pbo_fileobj)
+            headers, properties = self._get_headers(pbo_fileobj)
 
             if not self.dryrun:
                 os.makedirs(dest, exist_ok=True)
@@ -49,7 +50,7 @@ class Pbo:
                 with open(path, 'wb') as file:
                     data = pbo_fileobj.read(filesize)
                     if len(data) != filesize:
-                        raise ValueError('expected data, but reached end of file')
+                        self._error(ValueError, 'expected data, but reached end of file')
                     file.write(data)
 
                 os.utime(path, (header.timestamp, header.timestamp))
@@ -69,17 +70,22 @@ class Pbo:
 
             zero = pbo_fileobj.read(1)
             if zero[0] != 0:
-                raise ValueError('end of file checksum byte is not zero')
+                self._error(ValueError, 'end of file checksum byte is not zero')
 
             checksum = pbo_fileobj.read(20)
             if checksum != sha1.digest():
-                raise ValueError('checksums do not match')
+                self._error(ValueError, 'checksums do not match')
 
     def pack(self, directory, pbo_file):
         pass
 
-    @staticmethod
-    def get_headers(stream):
+    def _error(self, exception, message):
+        if self.ignore_errors:
+            printerr(message)
+        else:
+            raise exception(message)
+
+    def _get_headers(self, stream):
         headers = []
         properties = []
         first_header = True
@@ -88,7 +94,7 @@ class Pbo:
             header = HeaderEntry.from_stream(stream)
             if header.mimetype == HEADER_MIMETYPE_VERS:
                 if not first_header:
-                    raise ValueError('header with mimetype VERS not the first header found')
+                    self._error(ValueError, 'header with mimetype VERS not the first header found')
 
                 while True:
                     key = read_str(stream)
@@ -100,9 +106,13 @@ class Pbo:
                 first_header = False
                 continue
             if header.mimetype == HEADER_MIMETYPE_CPRS:
-                raise NotImplementedError('compressed PBO not supported')
+                self._error(NotImplementedError, 'compressed PBO not supported')
+                first_header = False
+                continue
             if header.mimetype == HEADER_MIMETYPE_ENCO:
-                raise NotImplementedError('encoded PBO not supported')
+                self._error(NotImplementedError, 'encoded PBO not supported')
+                first_header = False
+                continue
 
             if len(header.filename) == 0:
                 break
@@ -196,6 +206,9 @@ def read_str(stream):
         string += chr(char[0])
     return string
 
+def printerr(message):
+    print('error:', message, file=sys.stderr)
+
 def main(args):
     parser = argparse.ArgumentParser(
         description='Arma 3 PBO (un)packer',
@@ -233,6 +246,7 @@ If input is a file and no output is given, verifies the checksum of the file.
 
     pbo = Pbo(
         pbo_prop_fname=argspace.pbo_properties,
+        ignore_errors=argspace.ignore_errors,
         dryrun=argspace.dryrun,
         verbose=argspace.verbose,
     )
