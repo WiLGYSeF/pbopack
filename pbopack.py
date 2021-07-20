@@ -54,7 +54,13 @@ If input is a file and no output is given, verifies the checksum of the file.
 
     infmode = os.stat(infname).st_mode
     if stat.S_ISREG(infmode):
-        pbo.unpack(infname, outfname)
+        if outfname is None:
+            if pbo.verify(infname) is not None:
+                print('verified')
+            else:
+                print('error: not verified', file=sys.stderr)
+        else:
+            pbo.unpack(infname, outfname)
     elif stat.S_ISDIR(infmode):
         pbo.pack(infname, outfname)
     else:

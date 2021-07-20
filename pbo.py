@@ -165,6 +165,28 @@ class Pbo:
             pbo_fileobj.write(b'\x00')
             pbo_fileobj.write(sha1.digest())
 
+    def verify(self, pbo_file):
+        statresult = os.stat(pbo_file)
+
+        with open(pbo_file, 'rb') as file:
+            sha1 = hashlib.sha1()
+            offset = 0
+
+            while offset < statresult.st_size - 21:
+                readsz = min(FILE_BUFFER_SZ, statresult.st_size - offset - 21)
+                sha1.update(file.read(readsz))
+                offset += readsz
+
+            zero = file.read(1)
+            if zero[0] != 0:
+                self._error(ValueError, 'end of file checksum byte is not zero')
+
+            checksum = file.read(20)
+
+        if checksum == sha1.digest():
+            return sha1.hexdigest()
+        return False
+
     def _error(self, exception, message):
         if self.ignore_errors:
             printerr(message)
