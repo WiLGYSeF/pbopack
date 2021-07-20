@@ -119,7 +119,7 @@ class Pbo:
                 properties = []
                 with open(os.path.join(directory, self.pbo_prop_fname), 'r') as propfile:
                     for line in propfile:
-                        line = line.rstrip('\n')
+                        line = line.rstrip('\r\n')
                         if len(line) == 0:
                             continue
 
